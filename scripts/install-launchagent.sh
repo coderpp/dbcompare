@@ -15,10 +15,20 @@ fi
 mkdir -p "$HOME/Library/LaunchAgents"
 sed "s|__ROOT__|$ROOT|g" "$PLIST_SRC" >"$PLIST_DST"
 
-launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST_DST"
-launchctl enable "gui/$(id -u)/$LABEL"
-launchctl kickstart -k "gui/$(id -u)/$LABEL"
+# Prefer launchd when available (Terminal.app / login session). Cursor agent shells often fail bootstrap.
+UID_NUM="$(id -u)"
+DOMAIN="gui/${UID_NUM}"
+launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+if ! launchctl bootstrap "$DOMAIN" "$PLIST_DST" 2>/tmp/dbcompare-launchctl.err; then
+  echo "launchctl bootstrap failed (common inside Cursor)."
+  echo "Falling back to detached daemon via run-server.sh ..."
+  "$ROOT/scripts/run-server.sh" restart
+  echo "For auto-restart on login, run this same command in Terminal.app:"
+  echo "  make serve-daemon"
+  exit 0
+fi
+launchctl enable "$DOMAIN/$LABEL" 2>/dev/null || true
+launchctl kickstart -k "$DOMAIN/$LABEL"
 
 sleep 1
 if curl -sf "http://127.0.0.1:${DBCOMPARE_PORT:-13880}/" >/dev/null; then

@@ -1,7 +1,21 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Loading } from '@element-plus/icons-vue'
+import {
+  NSelect,
+  NInput,
+  NInputNumber,
+  NCheckbox,
+  NButton,
+  NForm,
+  NFormItem,
+  NModal,
+  NDrawer,
+  NDrawerContent,
+  NProgress,
+  NSpin,
+  NSpace,
+} from 'naive-ui'
+import { message, confirmBox, promptBox } from './ui'
 import * as ConnectionService from '../bindings/github.com/pp/db-compare/internal/service/connectionservice'
 import * as CompareService from '../bindings/github.com/pp/db-compare/internal/service/compareservice'
 import * as SyncService from '../bindings/github.com/pp/db-compare/internal/service/syncservice'
@@ -173,6 +187,22 @@ const saveOverwriteOptions = computed(() => {
 
 const connDialogTitle = computed(() => (connForm.value.id ? '编辑连接' : '新建连接'))
 
+const connectionOptions = computed(() =>
+  connections.value.map((c) => ({
+    label: c.name || connEndpoint(c),
+    value: c.id!,
+  })),
+)
+const sourceDbOptions = computed(() => sourceDatabases.value.map((db) => ({ label: db, value: db })))
+const targetDbOptions = computed(() => targetDatabases.value.map((db) => ({ label: db, value: db })))
+const connFormDbOptions = computed(() => connFormDatabases.value.map((db) => ({ label: db, value: db })))
+const profileSelectOptions = computed(() =>
+  saveOverwriteOptions.value.map((p) => ({
+    label: p.id === loadedProfileId.value ? `${p.name}（当前）` : p.name,
+    value: p.id,
+  })),
+)
+
 const visibleDiffColumns = computed(() =>
   (tableDiff.value?.columns || []).filter((c: any) => c.kind !== 'same'),
 )
@@ -275,7 +305,7 @@ async function loadDatabases(side: 'source' | 'target') {
       }
     }
   } catch (e: any) {
-    ElMessage.error(formatApiError(e))
+    message.error(formatApiError(e))
   }
 }
 
@@ -312,7 +342,7 @@ function openEditConn(c: Conn) {
 async function loadConnFormDatabases(silent = false) {
   const c = connForm.value
   if (!c.host?.trim() || !c.user?.trim()) {
-    if (!silent) ElMessage.warning('请先填写主机和用户')
+    if (!silent) message.warning('请先填写主机和用户')
     return
   }
   loadingConnDatabases.value = true
@@ -323,7 +353,7 @@ async function loadConnFormDatabases(silent = false) {
       connFormDatabases.value = [...dbs, c.database]
     }
   } catch (e: any) {
-    if (!silent) ElMessage.error(`加载数据库列表失败：${formatApiError(e)}`)
+    if (!silent) message.error(`加载数据库列表失败：${formatApiError(e)}`)
   } finally {
     loadingConnDatabases.value = false
   }
@@ -331,7 +361,7 @@ async function loadConnFormDatabases(silent = false) {
 
 function validateConnForm(c: Conn): boolean {
   if (!c.host?.trim() || !c.user?.trim()) {
-    ElMessage.warning('请填写主机和用户')
+    message.warning('请填写主机和用户')
     return false
   }
   return true
@@ -352,9 +382,9 @@ async function saveConn() {
     await ConnectionService.Save(connForm.value as any)
     showConnDialog.value = false
     await refreshConnections()
-    ElMessage.success(editing ? '连接已更新' : '连接已保存')
+    message.success(editing ? '连接已更新' : '连接已保存')
   } catch (e: any) {
-    ElMessage.error(formatApiError(e))
+    message.error(formatApiError(e))
   }
 }
 
@@ -363,10 +393,10 @@ async function testConnPayload(c: Conn, reloadFormDatabases = false) {
   testingConn.value = true
   try {
     const info = await ConnectionService.Test(c as any)
-    ElMessage.success(`连接成功：MySQL ${info.version}`)
+    message.success(`连接成功：MySQL ${info.version}`)
     if (reloadFormDatabases) await loadConnFormDatabases(true)
   } catch (e: any) {
-    ElMessage.error(formatApiError(e))
+    message.error(formatApiError(e))
   } finally {
     testingConn.value = false
   }
@@ -393,11 +423,11 @@ async function runCompare() {
   const srcConn = findConn(sourceId.value)
   const dstConn = findConn(targetId.value)
   if (!srcConn || !dstConn) {
-    ElMessage.warning('请选择源连接与目标连接')
+    message.warning('请选择源连接与目标连接')
     return
   }
   if (!sourceDatabase.value || !targetDatabase.value) {
-    ElMessage.warning('请选择源数据库与目标数据库')
+    message.warning('请选择源数据库与目标数据库')
     return
   }
   const src = { ...srcConn, database: sourceDatabase.value }
@@ -427,11 +457,11 @@ async function runCompare() {
     if (counts.value.modify) activeTab.value = 'modify'
     else if (counts.value.add) activeTab.value = 'add'
     else if (counts.value.drop) activeTab.value = 'drop'
-    ElMessage.success(
+    message.success(
       `对比完成：+${counts.value.add} ~${counts.value.modify} -${counts.value.drop} 张表`,
     )
   } catch (e: any) {
-    ElMessage.error(String(e))
+    message.error(String(e))
   } finally {
     comparing.value = false
   }
@@ -455,7 +485,7 @@ async function selectTable(row: TableRow) {
     const res = await CompareService.TableDiff(sessionId.value, row.table)
     tableDiff.value = res
   } catch (e: any) {
-    ElMessage.error(`加载表对比失败：${formatApiError(e)}`)
+    message.error(`加载表对比失败：${formatApiError(e)}`)
   } finally {
     loadingTableDiff.value = false
   }
@@ -487,12 +517,12 @@ async function runPlan() {
     } else {
       planSQL.value = '-- 未生成 DDL：所选差异在过滤后为空，请检查勾选或同步选项。'
     }
-    if (res.blocked) ElMessage.warning('预检存在阻断项，请查看 SQL 区问题或勾选允许不安全同步')
-    else if (!stmts.length && dropsSkipped) ElMessage.warning('差异仅为删除操作，请勾选「允许删除多余对象」')
-    else if (!stmts.length) ElMessage.warning('未生成 DDL')
-    else ElMessage.success(`已生成 ${stmts.length} 条 DDL`)
+    if (res.blocked) message.warning('预检存在阻断项，请查看 SQL 区问题或勾选允许不安全同步')
+    else if (!stmts.length && dropsSkipped) message.warning('差异仅为删除操作，请勾选「允许删除多余对象」')
+    else if (!stmts.length) message.warning('未生成 DDL')
+    else message.success(`已生成 ${stmts.length} 条 DDL`)
   } catch (e: any) {
-    ElMessage.error(String(e))
+    message.error(String(e))
   } finally {
     planning.value = false
   }
@@ -500,25 +530,21 @@ async function runPlan() {
 
 async function runApply() {
   if (!sessionId.value || !planStmtCount.value) {
-    ElMessage.warning('请先生成同步 SQL')
+    message.warning('请先生成同步 SQL')
     return
   }
-  try {
-    await ElMessageBox.confirm('将在目标库执行 DDL，且 DDL 不可事务回滚。确认继续？', '执行同步', {
-      type: 'warning',
-    })
-  } catch {
+  if (!(await confirmBox('将在目标库执行 DDL，且 DDL 不可事务回滚。确认继续？', '执行同步'))) {
     return
   }
   applying.value = true
   try {
     const res = await SyncService.Apply({ sessionId: sessionId.value, dryRun: false } as any)
     if (!res) throw new Error('empty apply result')
-    if (res.verifyClean) ElMessage.success(`同步完成：${res.applied} 条，复查通过`)
-    else ElMessage.warning(`同步结束：${res.verifySummary}`)
-    if (res.errors?.length) ElMessage.error(res.errors.join('\n'))
+    if (res.verifyClean) message.success(`同步完成：${res.applied} 条，复查通过`)
+    else message.warning(`同步结束：${res.verifySummary}`)
+    if (res.errors?.length) message.error(res.errors.join('\n'))
   } catch (e: any) {
-    ElMessage.error(String(e))
+    message.error(String(e))
   } finally {
     applying.value = false
   }
@@ -526,7 +552,7 @@ async function runApply() {
 
 function openSaveProfileDialog() {
   if (!sourceId.value || !targetId.value || !sourceDatabase.value || !targetDatabase.value) {
-    ElMessage.warning('请先选择源与目标连接和数据库')
+    message.warning('请先选择源与目标连接和数据库')
     return
   }
   const hasProfiles = profiles.value.length > 0
@@ -569,12 +595,12 @@ function onOverwriteTargetChange(id: string) {
 async function confirmSaveProfile() {
   const name = saveProfileName.value.trim()
   if (!name) {
-    ElMessage.warning('请填写方案名称')
+    message.warning('请填写方案名称')
     return
   }
   if (saveProfileMode.value === 'overwrite') {
     if (!saveProfileOverwriteId.value) {
-      ElMessage.warning('请选择要覆盖的方案')
+      message.warning('请选择要覆盖的方案')
       return
     }
   }
@@ -598,9 +624,9 @@ async function confirmSaveProfile() {
     await refreshProfiles()
     if (saved?.id) loadedProfileId.value = saved.id
     showSaveProfileDialog.value = false
-    ElMessage.success(saveProfileMode.value === 'overwrite' ? '方案已覆盖保存' : '同步方案已保存')
+    message.success(saveProfileMode.value === 'overwrite' ? '方案已覆盖保存' : '同步方案已保存')
   } catch (e: any) {
-    ElMessage.error(formatApiError(e))
+    message.error(formatApiError(e))
   } finally {
     savingProfile.value = false
   }
@@ -611,35 +637,19 @@ async function saveProfile() {
 }
 
 async function renameProfile(p: any) {
-  let name = p.name || ''
-  try {
-    const { value } = await ElMessageBox.prompt('修改方案名称', '重命名方案', {
-      inputValue: name,
-      confirmButtonText: '保存',
-      cancelButtonText: '取消',
-      inputPattern: /\S+/,
-      inputErrorMessage: '名称不能为空',
-    })
-    name = String(value).trim()
-  } catch {
-    return
-  }
-  if (name === p.name) return
+  const name = await promptBox('重命名方案', p.name || '', '方案名称')
+  if (name == null || name === p.name) return
   await ProfileService.Save({ ...p, name } as any)
   await refreshProfiles()
-  ElMessage.success('方案已重命名')
+  message.success('方案已重命名')
 }
 
 async function removeProfile(id: string) {
-  try {
-    await ElMessageBox.confirm('删除后无法恢复，确认删除此方案？', '删除方案', { type: 'warning' })
-  } catch {
-    return
-  }
+  if (!(await confirmBox('删除后无法恢复，确认删除此方案？', '删除方案'))) return
   await ProfileService.Delete(id)
   if (loadedProfileId.value === id) loadedProfileId.value = ''
   await refreshProfiles()
-  ElMessage.success('方案已删除')
+  message.success('方案已删除')
 }
 
 function profileEndpointLabel(p: any): string {
@@ -661,13 +671,7 @@ async function loadProfile(p: any) {
   await loadDatabases('source')
   await loadDatabases('target')
   showConnDrawer.value = false
-  ElMessage.success(`已加载方案：${p.name}`)
-}
-
-function riskType(r: string) {
-  if (r === 'critical' || r === 'error') return 'danger'
-  if (r === 'warn') return 'warning'
-  return 'info'
+  message.success(`已加载方案：${p.name}`)
 }
 
 function riskLabel(r: string) {
@@ -685,14 +689,14 @@ function kindMark(kind: string) {
 
 async function copySQL() {
   if (!planSQL.value || !planStmtCount.value) {
-    ElMessage.warning('暂无可复制的 SQL')
+    message.warning('暂无可复制的 SQL')
     return
   }
   try {
     await navigator.clipboard.writeText(planSQL.value)
-    ElMessage.success('已复制到剪贴板')
+    message.success('已复制到剪贴板')
   } catch {
-    ElMessage.error('复制失败')
+    message.error('复制失败')
   }
 }
 </script>
@@ -736,20 +740,22 @@ async function copySQL() {
           <span class="dot source-dot" />
           源 · 期望结构
         </div>
-        <el-select v-model="sourceId" placeholder="选择连接" class="full" filterable>
-          <el-option v-for="c in connections" :key="c.id" :label="c.name || connEndpoint(c)" :value="c.id!" />
-        </el-select>
-        <el-select
-          v-model="sourceDatabase"
-          placeholder="数据库"
-          class="full"
+        <n-select
+          v-model:value="sourceId"
+          :options="connectionOptions"
+          placeholder="选择连接"
           filterable
-          allow-create
-          default-first-option
+          class="full"
+        />
+        <n-select
+          v-model:value="sourceDatabase"
+          :options="sourceDbOptions"
+          placeholder="数据库"
+          filterable
+          tag
           :disabled="!sourceId"
-        >
-          <el-option v-for="db in sourceDatabases" :key="db" :label="db" :value="db" />
-        </el-select>
+          class="full"
+        />
         <div class="endpoint-meta" v-if="sourceInfo">{{ sourceInfo }}</div>
         <div class="endpoint-meta muted" v-else>{{ sourceConnLabel }}</div>
       </div>
@@ -761,32 +767,34 @@ async function copySQL() {
           <span class="dot target-dot" />
           目标 · 将被修改
         </div>
-        <el-select v-model="targetId" placeholder="选择连接" class="full" filterable>
-          <el-option v-for="c in connections" :key="c.id" :label="c.name || connEndpoint(c)" :value="c.id!" />
-        </el-select>
-        <el-select
-          v-model="targetDatabase"
-          placeholder="数据库"
-          class="full"
+        <n-select
+          v-model:value="targetId"
+          :options="connectionOptions"
+          placeholder="选择连接"
           filterable
-          allow-create
-          default-first-option
+          class="full"
+        />
+        <n-select
+          v-model:value="targetDatabase"
+          :options="targetDbOptions"
+          placeholder="数据库"
+          filterable
+          tag
           :disabled="!targetId"
-        >
-          <el-option v-for="db in targetDatabases" :key="db" :label="db" :value="db" />
-        </el-select>
+          class="full"
+        />
         <div class="endpoint-meta" v-if="targetInfo">{{ targetInfo }}</div>
         <div class="endpoint-meta muted" v-else>{{ targetConnLabel }}</div>
       </div>
     </section>
 
     <section v-if="showOptions" class="options-bar">
-      <label class="opt"><el-checkbox v-model="normalize.stripIntDisplayWidth" />忽略整数显示宽度</label>
-      <label class="opt"><el-checkbox v-model="normalize.unifyUtf8Aliases" />统一 utf8 / utf8mb3</label>
-      <label class="opt"><el-checkbox v-model="normalize.unifyUtf8mb4CiCollations" />统一 general_ci / 0900_ai_ci</label>
-      <label class="opt"><el-checkbox v-model="normalize.ignoreAutoIncrement" />忽略 AUTO_INCREMENT</label>
-      <label class="opt danger"><el-checkbox v-model="allowDrop" />允许删除多余对象</label>
-      <label class="opt danger"><el-checkbox v-model="allowUnsafe" />允许不安全降级</label>
+      <n-checkbox v-model:checked="normalize.stripIntDisplayWidth">忽略整数显示宽度</n-checkbox>
+      <n-checkbox v-model:checked="normalize.unifyUtf8Aliases">统一 utf8 / utf8mb3</n-checkbox>
+      <n-checkbox v-model:checked="normalize.unifyUtf8mb4CiCollations">统一 general_ci / 0900_ai_ci</n-checkbox>
+      <n-checkbox v-model:checked="normalize.ignoreAutoIncrement">忽略 AUTO_INCREMENT</n-checkbox>
+      <n-checkbox v-model:checked="allowDrop" class="opt-danger">允许删除多余对象</n-checkbox>
+      <n-checkbox v-model:checked="allowUnsafe" class="opt-danger">允许不安全降级</n-checkbox>
       <button type="button" class="link-btn" @click="saveProfile">保存当前方案</button>
     </section>
 
@@ -821,7 +829,9 @@ async function copySQL() {
           </button>
         </div>
 
-        <el-input v-model="tableFilter" clearable placeholder="筛选表名" size="small" class="table-filter" />
+        <div class="table-filter">
+          <n-input v-model:value="tableFilter" clearable placeholder="筛选表名" size="small" />
+        </div>
 
         <div class="table-list" v-if="currentTableRows.length">
           <div
@@ -831,9 +841,9 @@ async function copySQL() {
             :class="{ active: row.table === selectedTable, [`kind-${row.kind}`]: true }"
             @click="selectTable(row)"
           >
-            <el-checkbox
-              :model-value="row.selected"
-              @change="(v: boolean) => toggleTableRow(row, v)"
+            <n-checkbox
+              :checked="row.selected"
+              @update:checked="(v: boolean) => toggleTableRow(row, v)"
               @click.stop
             />
             <div class="table-row-main">
@@ -856,7 +866,7 @@ async function copySQL() {
             </div>
             <div class="pane-sub">源（期望） vs 目标（当前）</div>
           </div>
-          <el-icon v-if="loadingTableDiff" class="is-loading"><Loading /></el-icon>
+          <n-spin v-if="loadingTableDiff" :size="18" />
         </div>
 
         <div v-if="!selectedTable" class="empty-state">
@@ -980,12 +990,16 @@ async function copySQL() {
           </div>
         </div>
 
-        <el-progress
-          v-if="applying || progress.total"
-          :percentage="progress.total ? Math.round((100 * progress.done) / progress.total) : 0"
-          :status="progress.failed ? 'exception' : undefined"
-          style="margin: 0 0 10px"
-        />
+        <div v-if="applying || progress.total" class="progress-wrap">
+          <n-progress
+            type="line"
+            :percentage="progress.total ? Math.round((100 * progress.done) / progress.total) : 0"
+            :status="progress.failed ? 'error' : undefined"
+            :height="8"
+            :border-radius="4"
+            :indicator-placement="'outside'"
+          />
+        </div>
 
         <pre class="sql">{{ planSQL || '-- 勾选左侧差异表，点击「生成 SQL」' }}</pre>
       </section>
@@ -1005,66 +1019,69 @@ async function copySQL() {
       </div>
     </main>
 
-    <el-drawer
-      v-model="showConnDrawer"
-      size="400px"
-      :with-header="false"
-      class="mgr-drawer"
-      append-to-body
-    >
-      <div class="mgr">
-        <header class="mgr-header">
-          <div>
-            <div class="mgr-title">连接与方案</div>
-            <div class="mgr-sub">管理数据库连接与已存对比方案</div>
-          </div>
-          <button type="button" class="mini-btn" @click="showConnDrawer = false">关闭</button>
-        </header>
-
-        <section class="mgr-section">
-          <div class="mgr-section-head">
-            <span>连接</span>
-            <button type="button" class="ghost-btn sm" @click="openNewConn">新增连接</button>
-          </div>
-          <div v-if="!connections.length" class="mgr-empty">还没有连接，先新增一个</div>
-          <div v-for="c in connections" :key="c.id" class="mgr-card">
-            <div class="mgr-card-main">
-              <div class="mgr-card-title">{{ c.name || connEndpoint(c) }}</div>
-              <div class="mgr-card-sub">{{ connEndpoint(c) }}</div>
+    <n-drawer v-model:show="showConnDrawer" :width="400" placement="right" :trap-focus="false">
+      <n-drawer-content :native-scrollbar="false" body-content-style="padding: 0; background: #eef2f0;">
+        <div class="mgr">
+          <header class="mgr-header">
+            <div>
+              <div class="mgr-title">连接与方案</div>
+              <div class="mgr-sub">管理数据库连接与已存对比方案</div>
             </div>
-            <div class="mgr-card-actions">
-              <button type="button" class="text-btn" @click="openEditConn(c)">编辑</button>
-              <button type="button" class="text-btn" :disabled="testingConn" @click="testConn(c)">测试</button>
-              <button type="button" class="text-btn danger" @click="removeConn(c.id!)">删除</button>
-            </div>
-          </div>
-        </section>
+            <button type="button" class="mini-btn" @click="showConnDrawer = false">关闭</button>
+          </header>
 
-        <section class="mgr-section">
-          <div class="mgr-section-head">
-            <span>已存方案</span>
-            <button type="button" class="ghost-btn sm" @click="saveProfile">保存当前</button>
-          </div>
-          <div v-if="!profiles.length" class="mgr-empty">暂无方案，对比前可先保存源/目标组合</div>
-          <div v-for="p in profiles" :key="p.id" class="mgr-card" :class="{ current: p.id === loadedProfileId }">
-            <div class="mgr-card-main clickable" @click="loadProfile(p)">
-              <div class="mgr-card-title">
-                {{ p.name }}
-                <span v-if="p.id === loadedProfileId" class="current-badge">当前</span>
+          <section class="mgr-section">
+            <div class="mgr-section-head">
+              <span>连接</span>
+              <button type="button" class="ghost-btn sm" @click="openNewConn">新增连接</button>
+            </div>
+            <div v-if="!connections.length" class="mgr-empty">还没有连接，先新增一个</div>
+            <div v-for="c in connections" :key="c.id" class="mgr-card">
+              <div class="mgr-card-main">
+                <div class="mgr-card-title">{{ c.name || connEndpoint(c) }}</div>
+                <div class="mgr-card-sub">{{ connEndpoint(c) }}</div>
               </div>
-              <div class="mgr-card-sub">{{ profileEndpointLabel(p) }}</div>
+              <div class="mgr-card-actions">
+                <button type="button" class="text-btn" @click="openEditConn(c)">编辑</button>
+                <button type="button" class="text-btn" :disabled="testingConn" @click="testConn(c)">测试</button>
+                <button type="button" class="text-btn danger" @click="removeConn(c.id!)">删除</button>
+              </div>
             </div>
-            <div class="mgr-card-actions">
-              <button type="button" class="text-btn" @click="loadProfile(p)">加载</button>
-              <button type="button" class="text-btn" @click="renameProfile(p)">重命名</button>
-              <button type="button" class="text-btn danger" @click="removeProfile(p.id)">删除</button>
-            </div>
-          </div>
-        </section>
-      </div>
-    </el-drawer>
+          </section>
 
-    <el-dialog v-model="showSaveProfileDialog" title="保存方案" width="440px" append-to-body>
+          <section class="mgr-section">
+            <div class="mgr-section-head">
+              <span>已存方案</span>
+              <button type="button" class="ghost-btn sm" @click="saveProfile">保存当前</button>
+            </div>
+            <div v-if="!profiles.length" class="mgr-empty">暂无方案，对比前可先保存源/目标组合</div>
+            <div v-for="p in profiles" :key="p.id" class="mgr-card" :class="{ current: p.id === loadedProfileId }">
+              <div class="mgr-card-main clickable" @click="loadProfile(p)">
+                <div class="mgr-card-title">
+                  {{ p.name }}
+                  <span v-if="p.id === loadedProfileId" class="current-badge">当前</span>
+                </div>
+                <div class="mgr-card-sub">{{ profileEndpointLabel(p) }}</div>
+              </div>
+              <div class="mgr-card-actions">
+                <button type="button" class="text-btn" @click="loadProfile(p)">加载</button>
+                <button type="button" class="text-btn" @click="renameProfile(p)">重命名</button>
+                <button type="button" class="text-btn danger" @click="removeProfile(p.id)">删除</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </n-drawer-content>
+    </n-drawer>
+
+    <n-modal
+      v-model:show="showSaveProfileDialog"
+      preset="card"
+      title="保存方案"
+      style="width: 440px"
+      :bordered="false"
+      :segmented="{ content: true, footer: 'soft' }"
+    >
       <div class="save-profile-form">
         <div class="save-mode">
           <label class="save-mode-opt" :class="{ on: saveProfileMode === 'overwrite', disabled: !profiles.length }">
@@ -1085,25 +1102,18 @@ async function copySQL() {
 
         <div v-if="saveProfileMode === 'overwrite'" class="save-field">
           <div class="save-label">选择方案</div>
-          <el-select
-            v-model="saveProfileOverwriteId"
+          <n-select
+            v-model:value="saveProfileOverwriteId"
+            :options="profileSelectOptions"
             placeholder="选择要覆盖的方案"
             filterable
-            style="width: 100%"
-            @change="onOverwriteTargetChange"
-          >
-            <el-option
-              v-for="p in saveOverwriteOptions"
-              :key="p.id"
-              :label="p.id === loadedProfileId ? `${p.name}（当前）` : p.name"
-              :value="p.id"
-            />
-          </el-select>
+            @update:value="onOverwriteTargetChange"
+          />
         </div>
 
         <div class="save-field">
           <div class="save-label">{{ saveProfileMode === 'overwrite' ? '方案名称（可修改）' : '方案名称' }}</div>
-          <el-input v-model="saveProfileName" placeholder="输入方案名称" maxlength="80" />
+          <n-input v-model:value="saveProfileName" placeholder="输入方案名称" :maxlength="80" />
         </div>
 
         <div v-if="loadedProfile && saveProfileMode === 'overwrite' && saveProfileOverwriteId === loadedProfile.id" class="save-hint">
@@ -1111,50 +1121,61 @@ async function copySQL() {
         </div>
       </div>
       <template #footer>
-        <el-button @click="showSaveProfileDialog = false">取消</el-button>
-        <el-button type="primary" :loading="savingProfile" @click="confirmSaveProfile">
-          {{ saveProfileMode === 'overwrite' ? '覆盖保存' : '新建保存' }}
-        </el-button>
+        <n-space justify="end">
+          <n-button @click="showSaveProfileDialog = false">取消</n-button>
+          <n-button type="primary" :loading="savingProfile" @click="confirmSaveProfile">
+            {{ saveProfileMode === 'overwrite' ? '覆盖保存' : '新建保存' }}
+          </n-button>
+        </n-space>
       </template>
-    </el-dialog>
+    </n-modal>
 
-    <el-dialog v-model="showConnDialog" :title="connDialogTitle" width="480px" append-to-body>
-      <el-form label-width="88px">
-        <el-form-item label="名称"><el-input v-model="connForm.name" /></el-form-item>
-        <el-form-item label="主机"><el-input v-model="connForm.host" /></el-form-item>
-        <el-form-item label="端口"><el-input-number v-model="connForm.port" :min="1" :max="65535" /></el-form-item>
-        <el-form-item label="用户"><el-input v-model="connForm.user" /></el-form-item>
-        <el-form-item label="密码">
-          <el-input
-            v-model="connForm.password"
+    <n-modal
+      v-model:show="showConnDialog"
+      preset="card"
+      :title="connDialogTitle"
+      style="width: 480px"
+      :bordered="false"
+      :segmented="{ content: true, footer: 'soft' }"
+    >
+      <n-form label-placement="left" label-width="72" require-mark-placement="right-hanging">
+        <n-form-item label="名称"><n-input v-model:value="connForm.name" /></n-form-item>
+        <n-form-item label="主机"><n-input v-model:value="connForm.host" /></n-form-item>
+        <n-form-item label="端口">
+          <n-input-number v-model:value="connForm.port" :min="1" :max="65535" style="width: 100%" />
+        </n-form-item>
+        <n-form-item label="用户"><n-input v-model:value="connForm.user" /></n-form-item>
+        <n-form-item label="密码">
+          <n-input
+            v-model:value="connForm.password"
             type="password"
-            show-password
+            show-password-on="click"
             :placeholder="connForm.id ? '留空则不修改' : ''"
           />
-        </el-form-item>
-        <el-form-item label="默认库">
+        </n-form-item>
+        <n-form-item label="默认库">
           <div class="db-select-row">
-            <el-select
-              v-model="connForm.database"
+            <n-select
+              v-model:value="connForm.database"
+              :options="connFormDbOptions"
               placeholder="选择或输入库名"
               filterable
-              allow-create
+              tag
               clearable
-              default-first-option
               style="flex: 1"
-            >
-              <el-option v-for="db in connFormDatabases" :key="db" :label="db" :value="db" />
-            </el-select>
-            <el-button :loading="loadingConnDatabases" @click="loadConnFormDatabases()">刷新</el-button>
+            />
+            <n-button :loading="loadingConnDatabases" @click="loadConnFormDatabases()">刷新</n-button>
           </div>
-        </el-form-item>
-      </el-form>
+        </n-form-item>
+      </n-form>
       <template #footer>
-        <el-button :loading="testingConn" @click="testConnForm">测试连接</el-button>
-        <el-button @click="showConnDialog = false">取消</el-button>
-        <el-button type="primary" @click="saveConn">保存</el-button>
+        <n-space justify="end">
+          <n-button :loading="testingConn" @click="testConnForm">测试连接</n-button>
+          <n-button @click="showConnDialog = false">取消</n-button>
+          <n-button type="primary" @click="saveConn">保存</n-button>
+        </n-space>
       </template>
-    </el-dialog>
+    </n-modal>
   </div>
 </template>
 
@@ -1422,15 +1443,14 @@ async function copySQL() {
   border-radius: 12px;
 }
 
-.opt {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--muted);
-}
-.opt.danger {
+.opt-danger :deep(.n-checkbox__label) {
   color: #8a3b1d;
+}
+.progress-wrap {
+  padding: 0 12px 10px;
+}
+.table-filter {
+  padding: 8px 10px;
 }
 
 .warn-strip {
@@ -2017,17 +2037,5 @@ async function copySQL() {
   .swap-btn {
     justify-self: center;
   }
-}
-</style>
-
-<style>
-/* Drawer shell — unscoped so Element Plus teleport styles apply */
-.mgr-drawer.el-drawer {
-  background: #eef2f0 !important;
-}
-.mgr-drawer .el-drawer__body {
-  padding: 0 !important;
-  height: 100%;
-  overflow: auto;
 }
 </style>

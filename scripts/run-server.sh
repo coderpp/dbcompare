@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Start/stop DB Compare HTTP server (Wails server mode) in the background.
+# Detaches into a new session so Cursor/agent shells cannot kill it with the process group.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,6 +23,40 @@ running_pid() {
   return 1
 }
 
+# Fully detach: double-fork + setsid so parent shells / process groups cannot SIGTERM us.
+daemon_start() {
+  /usr/bin/python3 - "$BIN" "$LOG" "$PIDFILE" "$ROOT" <<'PY'
+import os, sys
+
+bin_path, log_path, pidfile, root = sys.argv[1:5]
+os.chdir(root)
+
+# First fork
+if os.fork() > 0:
+    sys.exit(0)
+os.setsid()
+# Second fork
+if os.fork() > 0:
+    sys.exit(0)
+
+os.chdir(root)
+os.umask(0)
+# Redirect stdio
+devnull = open(os.devnull, "r+")
+logf = open(log_path, "a", buffering=1)
+os.dup2(devnull.fileno(), 0)
+os.dup2(logf.fileno(), 1)
+os.dup2(logf.fileno(), 2)
+
+pid = os.getpid()
+with open(pidfile, "w") as f:
+    f.write(str(pid))
+
+os.environ.setdefault("DBCOMPARE_PORT", "13880")
+os.execv(bin_path, [bin_path])
+PY
+}
+
 cmd_start() {
   if pid="$(running_pid)"; then
     echo "dbcompare-server already running (pid=$pid) $URL"
@@ -35,14 +70,12 @@ cmd_start() {
     echo "missing $BIN — run: make build-server"
     exit 1
   fi
-  cd "$ROOT"
-  nohup "$BIN" >>"$LOG" 2>&1 &
-  local pid=$!
-  disown "$pid" 2>/dev/null || true
-  echo "$pid" >"$PIDFILE"
-  for _ in 1 2 3 4 5; do
-    sleep 1
-    if kill -0 "$pid" 2>/dev/null && curl -sf "$URL" >/dev/null; then
+  touch "$LOG"
+  daemon_start
+  # Parent returns immediately; wait for child to listen
+  for _ in 1 2 3 4 5 6 7 8; do
+    sleep 0.5
+    if pid="$(running_pid)" && curl -sf "$URL" >/dev/null; then
       echo "dbcompare-server started (pid=$pid) $URL"
       echo "log: $LOG"
       return 0
