@@ -1,0 +1,45 @@
+services:
+  # MySQL 5.7 official image is amd64-only and often crashes under QEMU on Apple Silicon.
+  # MariaDB 10.5 is the practical arm64 stand-in for 5.7-era DDL behaviour in local tests.
+  mysql57:
+    image: mariadb:10.5
+    container_name: dbcompare-mysql57
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: src_db
+      MARIADB_AUTO_UPGRADE: "1"
+    ports:
+      - "33057:3306"
+    volumes:
+      - ./seeds/common.sql:/docker-entrypoint-initdb.d/01_common.sql:ro
+      - ./seeds/mysql57.sql:/docker-entrypoint-initdb.d/02_mysql57.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mysql80:
+    image: mysql:8.0
+    container_name: dbcompare-mysql80
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: dst_db
+    ports:
+      - "33080:3306"
+    volumes:
+      - ./seeds/common.sql:/docker-entrypoint-initdb.d/01_common.sql:ro
+      - ./seeds/mysql80.sql:/docker-entrypoint-initdb.d/02_mysql80.sql:ro
+      - ./seeds/mysql80_extra_db.sql:/docker-entrypoint-initdb.d/03_extra.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 30

@@ -1,0 +1,61 @@
+-- Common baseline tables present on both MySQL 5.7 and 8.0.
+-- Loaded into MYSQL_DATABASE on each container.
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+CREATE TABLE IF NOT EXISTS users (
+  id INT NOT NULL AUTO_INCREMENT,
+  name VARCHAR(64) NOT NULL COMMENT 'display name',
+  email VARCHAR(128) NULL,
+  status TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_users_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='user accounts';
+
+CREATE TABLE IF NOT EXISTS orders (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  user_id INT NOT NULL,
+  amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  `rank` INT NOT NULL DEFAULT 0 COMMENT 'reserved-word column name',
+  note VARCHAR(255) NULL,
+  PRIMARY KEY (id),
+  KEY idx_orders_user (user_id),
+  CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS products (
+  id INT NOT NULL AUTO_INCREMENT,
+  code VARCHAR(32) NOT NULL,
+  title VARCHAR(128) NOT NULL,
+  price DECIMAL(10,2) NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_products_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=DYNAMIC;
+
+CREATE TABLE IF NOT EXISTS charset_demo (
+  id INT NOT NULL AUTO_INCREMENT,
+  col_utf8 VARCHAR(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  col_utf8mb4 VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  col_latin1 VARCHAR(32) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS int_width_demo (
+  id INT(11) NOT NULL AUTO_INCREMENT,
+  qty INT(11) NOT NULL DEFAULT 0,
+  tiny_flag TINYINT(1) NOT NULL DEFAULT 0,
+  padded INT(6) ZEROFILL NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS gen_col_demo (
+  id INT NOT NULL AUTO_INCREMENT,
+  first_name VARCHAR(32) NOT NULL,
+  last_name VARCHAR(32) NOT NULL,
+  full_name VARCHAR(65) GENERATED ALWAYS AS (CONCAT(first_name, ' ', last_name)) VIRTUAL,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET FOREIGN_KEY_CHECKS = 1;

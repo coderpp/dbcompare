@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.pp.dbcompare.server</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__ROOT__/bin/dbcompare-server</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>__ROOT__</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>__ROOT__/.dbcompare-server.log</string>
+	<key>StandardErrorPath</key>
+	<string>__ROOT__/.dbcompare-server.log</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>DBCOMPARE_PORT</key>
+		<string>13880</string>
+	</dict>
+</dict>
+</plist>

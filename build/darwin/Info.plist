@@ -1,0 +1,29 @@
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+    <dict>
+        <key>CFBundlePackageType</key>
+            <string>APPL</string>
+        <key>CFBundleName</key>
+            <string>DB Compare</string>
+        <key>CFBundleDisplayName</key>
+            <string>DB Compare</string>
+        <key>CFBundleExecutable</key>
+            <string>dbcompare</string>
+        <key>CFBundleIdentifier</key>
+            <string>com.pp.dbcompare</string>
+        <key>CFBundleVersion</key>
+            <string>0.1.1</string>
+        <key>CFBundleGetInfoString</key>
+            <string>MySQL schema compare and sync</string>
+        <key>CFBundleShortVersionString</key>
+            <string>0.1.1</string>
+        <key>CFBundleIconFile</key>
+            <string>icons</string>
+        <key>LSMinimumSystemVersion</key>
+            <string>12.0.0</string>
+        <key>NSHighResolutionCapable</key>
+            <true/>
+        <key>NSHumanReadableCopyright</key>
+            <string>© 2026</string>
+    </dict>
+</plist>
