@@ -16,16 +16,20 @@ import (
 
 // Session holds a compare result and planning context in memory.
 type Session struct {
-	ID         string
-	Source     *Conn
-	Target     *Conn
-	SourceSch  *schema.Schema
-	TargetSch  *schema.Schema
-	Changes    []schema.Change
-	Items      []dto.ChangeItem
-	Normalize  dto.NormalizeOptions
-	Plan       *dto.PlanResult
-	mu         sync.Mutex
+	SourceRepairs []dto.CommentRepair
+	TargetRepairs []dto.CommentRepair
+	applying      bool
+	Tables        []string
+	ID            string
+	Source        *Conn
+	Target        *Conn
+	SourceSch     *schema.Schema
+	TargetSch     *schema.Schema
+	Changes       []schema.Change
+	Items         []dto.ChangeItem
+	Normalize     dto.NormalizeOptions
+	Plan          *dto.PlanResult
+	mu            sync.Mutex
 }
 
 // SessionStore is an in-memory session registry.
@@ -98,6 +102,8 @@ func (e *Engine) Compare(ctx context.Context, req dto.CompareRequest) (*dto.Comp
 		return nil, err
 	}
 
+	sourceRepairs := detectedCommentRepairs(srcSch, req.Normalize.AutoRepairComments)
+	targetRepairs := detectedCommentRepairs(dstSch, req.Normalize.AutoRepairComments)
 	Normalize(srcSch, req.Normalize)
 	Normalize(dstSch, req.Normalize)
 
@@ -113,8 +119,7 @@ func (e *Engine) Compare(ctx context.Context, req dto.CompareRequest) (*dto.Comp
 		_ = dst.Close()
 		return nil, fmt.Errorf("schema diff: %w", err)
 	}
-	changes = pruneNoopChanges(changes, req.Normalize)
-	changes = pruneInvisibleModifies(changes, dstSch, srcSch, req.Normalize)
+	changes = visibleSchemaChanges(changes, dstSch, srcSch, req.Normalize)
 
 	items, warnings := classify(ctx, dst.Driver, changes, src.SemVer, dst.SemVer, srcSch)
 	if w := CheckLowerCaseConsistency(src.Info, dst.Info); w != "" {
@@ -137,25 +142,30 @@ func (e *Engine) Compare(ctx context.Context, req dto.CompareRequest) (*dto.Comp
 	}
 
 	sess := &Session{
-		ID:        uuid.NewString(),
-		Source:    src,
-		Target:    dst,
-		SourceSch: srcSch,
-		TargetSch: dstSch,
-		Changes:   changes,
-		Items:     items,
-		Normalize: req.Normalize,
+		SourceRepairs: sourceRepairs,
+		TargetRepairs: targetRepairs,
+		ID:            uuid.NewString(),
+		Source:        src,
+		Target:        dst,
+		SourceSch:     srcSch,
+		TargetSch:     dstSch,
+		Changes:       changes,
+		Items:         items,
+		Normalize:     req.Normalize,
+		Tables:        append([]string(nil), req.Tables...),
 	}
 	e.Sessions.Put(sess)
 
 	return &dto.CompareResult{
-		SourceInfo: src.Info,
-		TargetInfo: dst.Info,
-		Added:      filterKind(items, dto.KindAdd),
-		Modified:   filterKind(items, dto.KindModify),
-		Dropped:    filterKind(items, dto.KindDrop),
-		Warnings:   warnings,
-		SessionID:  sess.ID,
+		SourceRepairs: sourceRepairs,
+		TargetRepairs: targetRepairs,
+		SourceInfo:    src.Info,
+		TargetInfo:    dst.Info,
+		Added:         filterKind(items, dto.KindAdd),
+		Modified:      filterKind(items, dto.KindModify),
+		Dropped:       filterKind(items, dto.KindDrop),
+		Warnings:      warnings,
+		SessionID:     sess.ID,
 	}, nil
 }
 
@@ -194,7 +204,8 @@ func classify(ctx context.Context, drv migrate.Driver, changes []schema.Change, 
 		// Expand ModifyTable children for finer selection.
 		if mt, ok := ch.(*schema.ModifyTable); ok {
 			for j, sub := range mt.Changes {
-				subItem := changeToItem(sub, i*1000+j+1, "", dstVer)
+				subItem := changeToItem(sub, j, "", dstVer)
+				subItem.ID = childChangeID(i, j)
 				subItem.Table = mt.T.Name
 				if subItem.Kind == "" {
 					subItem.Kind = dto.KindModify
@@ -266,6 +277,38 @@ func changeToItem(ch schema.Change, idx int, sql string, dstVer SemVer) dto.Chan
 		item.ObjectType = "index"
 		item.ObjectName = c.To.Name
 		item.Summary = fmt.Sprintf("MODIFY INDEX `%s`", c.To.Name)
+	case *schema.AddPrimaryKey:
+		item.Kind = dto.KindAdd
+		item.ObjectType = "index"
+		item.ObjectName = "PRIMARY"
+		item.Summary = "ADD PRIMARY KEY"
+	case *schema.DropPrimaryKey:
+		item.Kind = dto.KindDrop
+		item.ObjectType = "index"
+		item.ObjectName = "PRIMARY"
+		item.Summary = "DROP PRIMARY KEY"
+		item.Risk = dto.RiskCritical
+	case *schema.ModifyPrimaryKey:
+		item.Kind = dto.KindModify
+		item.ObjectType = "index"
+		item.ObjectName = "PRIMARY"
+		item.Summary = "MODIFY PRIMARY KEY"
+		item.Risk = dto.RiskWarn
+	case *schema.AddAttr:
+		item.Kind = dto.KindModify
+		item.ObjectType = "attr"
+		item.ObjectName = attributeName(c.A)
+		item.Summary = "设置表属性 " + item.ObjectName
+	case *schema.DropAttr:
+		item.Kind = dto.KindModify
+		item.ObjectType = "attr"
+		item.ObjectName = attributeName(c.A)
+		item.Summary = "移除表属性 " + item.ObjectName
+	case *schema.ModifyAttr:
+		item.Kind = dto.KindModify
+		item.ObjectType = "attr"
+		item.ObjectName = attributeName(c.To)
+		item.Summary = "修改表属性 " + item.ObjectName
 	case *schema.AddForeignKey:
 		item.Kind = dto.KindAdd
 		item.ObjectType = "foreign_key"
@@ -302,6 +345,22 @@ func changeToItem(ch schema.Change, idx int, sql string, dstVer SemVer) dto.Chan
 	return item
 }
 
+func attributeName(a schema.Attr) string {
+	switch a.(type) {
+	case *schema.Charset:
+		return "CHARSET"
+	case *schema.Collation:
+		return "COLLATE"
+	case *schema.Comment:
+		return "COMMENT"
+	case *mysql.Engine:
+		return "ENGINE"
+	case *mysql.AutoIncrement:
+		return "AUTO_INCREMENT"
+	}
+	return fmt.Sprintf("%T", a)
+}
+
 func riskOfModify(mt *schema.ModifyTable) dto.RiskLevel {
 	risk := dto.RiskInfo
 	for _, ch := range mt.Changes {
@@ -317,7 +376,14 @@ func riskOfModify(mt *schema.ModifyTable) dto.RiskLevel {
 	return risk
 }
 
-// SelectChanges filters schema.Change by selected item IDs (top-level only).
+// childChangeID uses a separate namespace so child IDs cannot collide with
+// top-level IDs, including children of the first ModifyTable.
+func childChangeID(parent, child int) string {
+	return fmt.Sprintf("c%d/%d", parent, child)
+}
+
+// SelectChanges includes whole tables when their parent ID is selected, or
+// only selected children otherwise. It never modifies the stored changes.
 func (s *Session) SelectChanges(ids []string) []schema.Change {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -325,27 +391,16 @@ func (s *Session) SelectChanges(ids []string) []schema.Change {
 	for _, id := range ids {
 		set[id] = true
 	}
-	// If child modify items selected, include parent ModifyTable.
-	parentNeed := map[int]bool{}
-	for _, id := range ids {
-		var n int
-		if _, err := fmt.Sscanf(id, "c%d", &n); err == nil && n >= 1000 {
-			parentNeed[n/1000] = true
-		}
-	}
 	out := make([]schema.Change, 0)
 	for i, ch := range s.Changes {
-		id := fmt.Sprintf("c%d", i)
-		if set[id] || parentNeed[i] {
+		if set[fmt.Sprintf("c%d", i)] {
 			out = append(out, ch)
 			continue
 		}
-		// Filter ModifyTable sub-changes if only some children selected.
 		if mt, ok := ch.(*schema.ModifyTable); ok {
 			var keep []schema.Change
 			for j, sub := range mt.Changes {
-				sid := fmt.Sprintf("c%d", i*1000+j+1)
-				if set[sid] {
+				if set[childChangeID(i, j)] {
 					keep = append(keep, sub)
 				}
 			}
@@ -456,13 +511,13 @@ func (e *Engine) TableDiff(sessionID, tableName string) (*dto.TableDiffResult, e
 	dstIdxs := map[string]*schema.Index{}
 	var srcIdxOrder []string
 	if srcTable != nil {
-		for _, idx := range srcTable.Indexes {
+		for _, idx := range tableIndexes(srcTable) {
 			srcIdxs[idx.Name] = idx
 			srcIdxOrder = append(srcIdxOrder, idx.Name)
 		}
 	}
 	if dstTable != nil {
-		for _, idx := range dstTable.Indexes {
+		for _, idx := range tableIndexes(dstTable) {
 			dstIdxs[idx.Name] = idx
 		}
 	}
@@ -490,7 +545,7 @@ func (e *Engine) TableDiff(sessionID, tableName string) (*dto.TableDiffResult, e
 		}
 	}
 	if dstTable != nil {
-		for _, idx := range dstTable.Indexes {
+		for _, idx := range tableIndexes(dstTable) {
 			if !seenIdx[idx.Name] {
 				result.Indexes = append(result.Indexes, dto.ColDiff{
 					Name: idx.Name, Kind: "drop",
@@ -547,7 +602,20 @@ func (e *Engine) TableDiff(sessionID, tableName string) (*dto.TableDiffResult, e
 			}
 		}
 	}
+	if sess.Normalize.IgnoreIndexes && srcTable != nil && dstTable != nil {
+		result.Indexes = nil
+	}
 	return result, nil
+}
+
+func tableIndexes(t *schema.Table) []*schema.Index {
+	out := append([]*schema.Index(nil), t.Indexes...)
+	if t.PrimaryKey != nil {
+		cp := *t.PrimaryKey
+		cp.Name = "PRIMARY"
+		out = append([]*schema.Index{&cp}, out...)
+	}
+	return out
 }
 
 func colDesc(c *schema.Column, opts dto.NormalizeOptions) string {

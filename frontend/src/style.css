@@ -2,7 +2,7 @@ html, body, #app {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: #eef2f0;
+  background: #f7f9fb;
   color: #15201c;
 }
 
@@ -11,6 +11,6 @@ html, body, #app {
 }
 
 body {
-  font-family: "Sora", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
 }

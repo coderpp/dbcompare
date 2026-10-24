@@ -20,11 +20,12 @@ import (
 
 // Conn wraps a live MySQL connection and its Atlas driver.
 type Conn struct {
-	DB     *sql.DB
-	Driver migrate.Driver
-	Config dto.ConnConfig
-	Info   dto.ServerInfo
-	SemVer SemVer
+	ArchiveModel string
+	DB           *sql.DB
+	Driver       migrate.Driver
+	Config       dto.ConnConfig
+	Info         dto.ServerInfo
+	SemVer       SemVer
 }
 
 // SemVer is a parsed MySQL server version.
@@ -226,6 +227,9 @@ WHERE table_schema = ?`, database).Scan(&n)
 
 // Inspect reads schema metadata for the connected database.
 func (c *Conn) Inspect(ctx context.Context, tables []string) (*schema.Schema, error) {
+	if c.ArchiveModel != "" {
+		return ReadArchiveModel(c.ArchiveModel)
+	}
 	opts := &schema.InspectOptions{
 		Mode: schema.InspectTables,
 	}

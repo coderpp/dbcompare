@@ -9,6 +9,44 @@ import (
 	"github.com/pp/db-compare/internal/dto"
 )
 
+// visibleSchemaChanges is shared by comparison and post-sync verification so
+// metadata differences hidden in the UI cannot produce verification failures.
+func visibleSchemaChanges(changes []schema.Change, current, desired *schema.Schema, opts dto.NormalizeOptions) []schema.Change {
+	changes = filterIndexChanges(changes, opts)
+	changes = pruneNoopChanges(changes, opts)
+	return pruneInvisibleModifies(changes, current, desired, opts)
+}
+
+// Existing-table indexes can be ignored without stripping keys from new tables.
+// Keep full desired/current metadata for column and foreign-key dependencies.
+func filterIndexChanges(changes []schema.Change, opts dto.NormalizeOptions) []schema.Change {
+	if !opts.IgnoreIndexes {
+		return changes
+	}
+	out := make([]schema.Change, 0, len(changes))
+	for _, ch := range changes {
+		mt, ok := ch.(*schema.ModifyTable)
+		if !ok {
+			out = append(out, ch)
+			continue
+		}
+		keep := make([]schema.Change, 0, len(mt.Changes))
+		for _, sub := range mt.Changes {
+			switch sub.(type) {
+			case *schema.AddIndex, *schema.DropIndex, *schema.ModifyIndex, *schema.RenameIndex, *schema.AddPrimaryKey, *schema.DropPrimaryKey, *schema.ModifyPrimaryKey:
+				continue
+			}
+			keep = append(keep, sub)
+		}
+		if len(keep) > 0 {
+			cp := *mt
+			cp.Changes = keep
+			out = append(out, &cp)
+		}
+	}
+	return out
+}
+
 // pruneNoopChanges drops Atlas diffs that are equivalent after normalization
 // (utf8/utf8mb3 aliases, inherited charset, comment-only when ignored, empty ModifyTable).
 func pruneNoopChanges(changes []schema.Change, opts dto.NormalizeOptions) []schema.Change {
@@ -213,9 +251,9 @@ func appendTableAttrDiffs(out []dto.ColDiff, name, src, dst string) []dto.ColDif
 	if cmpSrc != cmpDst {
 		kind = "modify"
 		if src == "" {
-			kind = "add"
-		} else if dst == "" {
 			kind = "drop"
+		} else if dst == "" {
+			kind = "add"
 		}
 	}
 	return append(out, dto.ColDiff{Name: name, Kind: kind, Source: src, Target: dst})
@@ -288,21 +326,24 @@ func tableHasVisibleDiff(src, dst *schema.Table, opts dto.NormalizeOptions) bool
 		}
 	}
 
-	srcIdx := map[string]string{}
-	for _, idx := range src.Indexes {
-		srcIdx[idx.Name] = idxDesc(idx)
-	}
-	dstIdx := map[string]string{}
-	for _, idx := range dst.Indexes {
-		dstIdx[idx.Name] = idxDesc(idx)
-	}
-	if len(srcIdx) != len(dstIdx) {
-		return true
-	}
-	for name, desc := range srcIdx {
-		if dstIdx[name] != desc {
+	if !opts.IgnoreIndexes {
+		srcIdx := map[string]string{}
+		for _, idx := range tableIndexes(src) {
+			srcIdx[idx.Name] = idxDesc(idx)
+		}
+		dstIdx := map[string]string{}
+		for _, idx := range tableIndexes(dst) {
+			dstIdx[idx.Name] = idxDesc(idx)
+		}
+		if len(srcIdx) != len(dstIdx) {
 			return true
 		}
+		for name, desc := range srcIdx {
+			if dstIdx[name] != desc {
+				return true
+			}
+		}
+
 	}
 
 	srcFK := map[string]string{}

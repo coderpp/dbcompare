@@ -6,6 +6,7 @@
  */
 export interface ApplyRequest {
     "sessionId": string;
+    "planId": string;
 
     /**
      * empty = all
@@ -18,6 +19,7 @@ export interface ApplyRequest {
  * ApplyResult is the final sync outcome including post-verify.
  */
 export interface ApplyResult {
+    "run"?: SyncRun | null;
     "applied": number;
     "failed": number;
     "errors": string[] | null;
@@ -89,6 +91,14 @@ export interface ColDiff {
     "target"?: string;
 }
 
+export interface CommentRepair {
+    "id": string;
+    "table": string;
+    "column": string;
+    "original": string;
+    "recovered": string;
+}
+
 /**
  * CompareRequest asks the engine to compare two schemas.
  */
@@ -103,6 +113,8 @@ export interface CompareRequest {
  * CompareResult is the full classified diff for the UI.
  */
 export interface CompareResult {
+    "sourceRepairs"?: CommentRepair[] | null;
+    "targetRepairs"?: CommentRepair[] | null;
     "sourceInfo": ServerInfo;
     "targetInfo": ServerInfo;
     "added": ChangeItem[] | null;
@@ -117,6 +129,7 @@ export interface CompareResult {
  * Database is an optional default schema hint; compare/sync passes the active database separately.
  */
 export interface ConnConfig {
+    "snapshotId"?: string;
     "id": string;
     "name": string;
     "host": string;
@@ -135,10 +148,29 @@ export interface ConnConfig {
     "params"?: string;
 }
 
+export interface ExportFile {
+    "filename": string;
+    "content": string;
+}
+
+export interface ExportRequest {
+    "sessionId"?: string;
+    "runId"?: string;
+
+    /**
+     * sql, snapshot, report, reverse
+     */
+    "kind": string;
+}
+
 /**
  * NormalizeOptions controls cross-version noise suppression.
  */
 export interface NormalizeOptions {
+    /**
+     * opt-in: normalize reversible mojibake and include explicit repair plans
+     */
+    "autoRepairComments": boolean;
     "stripIntDisplayWidth": boolean;
     "unifyUtf8Aliases": boolean;
 
@@ -148,6 +180,11 @@ export interface NormalizeOptions {
     "unifyUtf8mb4CiCollations": boolean;
     "ignoreAutoIncrement": boolean;
     "ignoreIndexOrder": boolean;
+
+    /**
+     * false preserves index comparison for older saved profiles
+     */
+    "ignoreIndexes": boolean;
     "ignoreCommentsOnly": boolean;
     "compareRowFormat": boolean;
     "hideGipk": boolean;
@@ -167,6 +204,19 @@ export interface PlanRequest {
  * PlanResult holds ordered DDL and precheck findings.
  */
 export interface PlanResult {
+    /**
+     * separately confirmed source database repairs, executed before this target plan
+     */
+    "sourceRepairPlan"?: PlanResult | null;
+    "targetDatabase": string;
+    "id": string;
+    "sessionId": string;
+    "selected": ChangeItem[] | null;
+    "snapshots": TableSnapshot[] | null;
+    "allowDrop": boolean;
+    "allowUnsafe": boolean;
+    "mode": string;
+    "repairs"?: CommentRepair[] | null;
     "statements": PlannedStatement[] | null;
     "prechecks": PrecheckIssue[] | null;
     "blocked": boolean;
@@ -178,6 +228,8 @@ export interface PlanResult {
 export interface PlannedStatement {
     "id": string;
     "changeId": string;
+    "changeIds": string[] | null;
+    "table": string;
     "sql": string;
     "reverse"?: string;
     "risk": RiskLevel;
@@ -192,6 +244,28 @@ export interface PrecheckIssue {
     "code": string;
     "message": string;
     "table"?: string;
+}
+
+export interface RemainingDifference {
+    "item": ChangeItem;
+
+    /**
+     * selected, unselected, skipped_drop
+     */
+    "category": string;
+}
+
+export interface RepairRequest {
+    "sessionId": string;
+    "side": string;
+    "ids": string[] | null;
+}
+
+export interface ResumeResult {
+    "compare": CompareResult | null;
+    "changeIds": string[] | null;
+    "repairIds": string[] | null;
+    "mode": string;
 }
 
 /**
@@ -209,6 +283,15 @@ export enum RiskLevel {
     RiskCritical = "critical",
 };
 
+export interface SchemaArchive {
+    "format": number;
+    "database": string;
+    "server": ServerInfo;
+    "model": string;
+    "tables": TableSnapshot[] | null;
+    "warnings": string[] | null;
+}
+
 /**
  * ServerInfo describes a live MySQL instance.
  */
@@ -219,6 +302,177 @@ export interface ServerInfo {
     "charsetServer": string;
     "collationServer": string;
     "hasSelectPriv": boolean;
+}
+
+export interface SettingsBundle {
+    "includesPasswords"?: boolean;
+    "format": string;
+    "version": number;
+    "exportedAt": string;
+    "connections": SettingsConnection[] | null;
+    "profiles": SyncProfile[] | null;
+}
+
+/**
+ * Password is populated only by an explicitly requested credential export.
+ */
+export interface SettingsConnection {
+    "password"?: string;
+    "id": string;
+    "name": string;
+    "host": string;
+    "port": number;
+    "user": string;
+    "database"?: string;
+    "params"?: string;
+}
+
+export interface SettingsExportFile {
+    "filename": string;
+    "content": string;
+    "warnings": string[] | null;
+    "path"?: string;
+}
+
+export interface SettingsExportRequest {
+    "includePasswords": boolean;
+    "all": boolean;
+    "connectionIds": string[] | null;
+    "profileIds": string[] | null;
+}
+
+export interface SettingsImportResult {
+    "passwordsImported": number;
+    "connections": SettingsConnection[] | null;
+    "profiles": SyncProfile[] | null;
+    "warnings": string[] | null;
+}
+
+export interface SettingsPreview {
+    "passwordConnectionIds": string[] | null;
+    "bundle": SettingsBundle;
+    "warnings": string[] | null;
+    "conflictingConnections": string[] | null;
+    "conflictingProfiles": string[] | null;
+}
+
+export interface SnapshotDiff {
+    "before": string;
+    "after": string;
+    "differences": SnapshotDifference[] | null;
+    "sql": string;
+    "warnings": string[] | null;
+    "sessionId": string;
+}
+
+export interface SnapshotDiffRequest {
+    "beforeId": string;
+    "afterId": string;
+    "live"?: SnapshotTarget | null;
+    "normalize": NormalizeOptions;
+    "restore": boolean;
+}
+
+export interface SnapshotDifference {
+    "table": string;
+    "kind": string;
+    "before": string;
+    "after": string;
+    "items": ChangeItem[] | null;
+}
+
+export interface SnapshotDocument {
+    "record": SnapshotRecord;
+    "archive": SchemaArchive;
+}
+
+export interface SnapshotExport {
+    "filename": string;
+    "content": string;
+}
+
+export interface SnapshotOutcome {
+    "target": SnapshotTarget;
+    "connectionName": string;
+    "snapshotId": string;
+    "unchanged": boolean;
+    "error": string;
+    "durationMs": number;
+}
+
+export interface SnapshotOverview {
+    "tasks": SnapshotTask[] | null;
+    "snapshots": SnapshotRecord[] | null;
+    "runs": SnapshotRun[] | null;
+    "background": boolean;
+}
+
+export interface SnapshotRecord {
+    "id": string;
+    "taskId": string;
+    "connectionId": string;
+    "connectionName": string;
+    "database": string;
+    "capturedAt": string;
+    "lastCheckedAt"?: string;
+    "hash": string;
+    "tableCount": number;
+    "unchanged": boolean;
+    "pinned": boolean;
+    "note": string;
+    "warnings": string[] | null;
+}
+
+export interface SnapshotRun {
+    "id": string;
+    "taskId": string;
+    "taskName": string;
+    "startedAt": string;
+    "finishedAt": string;
+    "catchUp": boolean;
+    "status": string;
+    "results": SnapshotOutcome[] | null;
+}
+
+/**
+ * SnapshotTarget stores references only. Secrets are resolved at capture time.
+ */
+export interface SnapshotTarget {
+    "connectionId": string;
+    "database": string;
+}
+
+export interface SnapshotTask {
+    "id": string;
+    "name": string;
+    "targets": SnapshotTarget[] | null;
+
+    /**
+     * interval, daily, weekly
+     */
+    "schedule": string;
+    "intervalHours": number;
+    "time": string;
+
+    /**
+     * Sunday=0
+     */
+    "weekdays": number[] | null;
+    "retentionDays": number;
+    "enabled": boolean;
+    "background": boolean;
+    "nextRun": string;
+}
+
+export interface StatementOutcome {
+    "statement": PlannedStatement;
+
+    /**
+     * pending, running, success, failed, not_executed
+     */
+    "status": string;
+    "error"?: string;
+    "durationMs": number;
 }
 
 /**
@@ -239,6 +493,32 @@ export interface SyncProfile {
     "updatedAt": string;
 }
 
+export interface SyncRun {
+    "tables"?: string[] | null;
+    "id": string;
+    "sessionId": string;
+    "planId": string;
+    "startedAt": string;
+    "finishedAt"?: string;
+    "status": string;
+    "source": ConnConfig;
+    "target": ConnConfig;
+    "normalize": NormalizeOptions;
+    "allowDrop": boolean;
+    "allowUnsafe": boolean;
+    "mode": string;
+    "selected": ChangeItem[] | null;
+    "outcomes": StatementOutcome[] | null;
+    "snapshots": TableSnapshot[] | null;
+    "remaining": RemainingDifference[] | null;
+    "verificationError"?: string;
+    "selectionComplete": boolean;
+    "applied": number;
+    "failed": number;
+    "error"?: string;
+    "repairs"?: CommentRepair[] | null;
+}
+
 /**
  * TableDiffResult is a structured column/index comparison for one table.
  */
@@ -248,4 +528,14 @@ export interface TableDiffResult {
     "columns": ColDiff[] | null;
     "indexes": ColDiff[] | null;
     "foreignKeys": ColDiff[] | null;
+}
+
+/**
+ * Snapshot contains structure only, never table data or connection passwords.
+ */
+export interface TableSnapshot {
+    "table": string;
+    "exists": boolean;
+    "ddl": string;
+    "sha256": string;
 }

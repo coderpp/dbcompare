@@ -15,25 +15,25 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as dto$0 from "../dto/models.js";
 
 export function Delete(id: string): $CancellablePromise<void> {
-    return $Call.ByID(4052875913, id);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.ConnectionService.Delete", id);
 }
 
 export function GetWithPassword(id: string): $CancellablePromise<dto$0.ConnConfig> {
-    return $Call.ByID(904469643, id);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.ConnectionService.GetWithPassword", id);
 }
 
 export function List(): $CancellablePromise<dto$0.ConnConfig[] | null> {
-    return $Call.ByID(3564890218);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.ConnectionService.List");
 }
 
 export function ListDatabases(c: dto$0.ConnConfig): $CancellablePromise<string[] | null> {
-    return $Call.ByID(3560809804, c);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.ConnectionService.ListDatabases", c);
 }
 
 export function Save(c: dto$0.ConnConfig): $CancellablePromise<dto$0.ConnConfig> {
-    return $Call.ByID(3287427963, c);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.ConnectionService.Save", c);
 }
 
 export function Test(c: dto$0.ConnConfig): $CancellablePromise<dto$0.ServerInfo> {
-    return $Call.ByID(291012038, c);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.ConnectionService.Test", c);
 }

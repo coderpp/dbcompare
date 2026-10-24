@@ -15,17 +15,17 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as dto$0 from "../dto/models.js";
 
 export function Delete(id: string): $CancellablePromise<void> {
-    return $Call.ByID(257782354, id);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.ProfileService.Delete", id);
 }
 
 export function Export(id: string): $CancellablePromise<string> {
-    return $Call.ByID(776364715, id);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.ProfileService.Export", id);
 }
 
 export function List(): $CancellablePromise<dto$0.SyncProfile[] | null> {
-    return $Call.ByID(4085966553);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.ProfileService.List");
 }
 
 export function Save(p: dto$0.SyncProfile): $CancellablePromise<dto$0.SyncProfile> {
-    return $Call.ByID(2485992736, p);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.ProfileService.Save", p);
 }

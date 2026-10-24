@@ -15,22 +15,22 @@ export const themeOverrides: GlobalThemeOverrides = {
     successColor: '#1f7a4d',
     warningColor: '#b45309',
     errorColor: '#a33',
-    borderRadius: '8px',
-    fontFamily: '"Sora", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif',
+    borderRadius: '4px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif',
     fontFamilyMono: '"IBM Plex Mono", ui-monospace, Menlo, monospace',
   },
   Button: {
-    borderRadiusMedium: '8px',
+    borderRadiusMedium: '4px',
     heightMedium: '34px',
   },
   Input: {
-    borderRadius: '8px',
+    borderRadius: '4px',
     heightMedium: '34px',
   },
   Select: {
     peers: {
       InternalSelection: {
-        borderRadius: '8px',
+        borderRadius: '4px',
         heightMedium: '34px',
       },
     },

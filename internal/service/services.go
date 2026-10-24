@@ -22,9 +22,12 @@ func (NopEmitter) Emit(string, any) {}
 
 // AppServices groups engine + store for all services.
 type AppServices struct {
-	Engine *engine.Engine
-	Store  *store.Store
-	Events EventEmitter
+	Engine      *engine.Engine
+	Store       *store.Store
+	Events      EventEmitter
+	SaveFile    func(string, string) (string, error)
+	OpenFile    func() (string, error)
+	OpenArchive func() (string, error)
 }
 
 func (a *AppServices) emitter() EventEmitter {
@@ -188,11 +191,14 @@ func (s *SyncService) Plan(req dto.PlanRequest) (*dto.PlanResult, error) {
 func (s *SyncService) Apply(req dto.ApplyRequest) (*dto.ApplyResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	return s.App.Engine.Apply(ctx, req, func(p dto.ApplyProgress) {
+	if req.PlanID == "" {
+		return nil, fmt.Errorf("请重新生成 SQL 后执行")
+	}
+	return s.App.Engine.ApplyTracked(ctx, req, func(p dto.ApplyProgress) {
 		s.App.emitter().Emit("sync:progress", p)
 	}, func(e dto.AuditEntry) {
 		_ = s.App.Store.AppendAudit(e)
-	})
+	}, s.App.Store.SaveRun)
 }
 
 func (s *SyncService) ListAudit(limit int) ([]dto.AuditEntry, error) {

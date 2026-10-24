@@ -29,10 +29,10 @@ This product bundles or depends on the following open-source components.
 - License: MIT
 - Homepage: https://github.com/zalando/go-keyring
 
-## Vue / Element Plus / Vite (frontend)
+## Vue / Naive UI / Vite (frontend)
 
 - Vue: MIT — https://github.com/vuejs/core
-- Element Plus: MIT — https://github.com/element-plus/element-plus
+- Naive UI: MIT — https://github.com/tusen-ai/naive-ui
 - Vite: MIT — https://github.com/vitejs/vite
 
 Full Apache-2.0 / MIT / MPL texts are available from the respective upstream repositories.

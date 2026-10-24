@@ -15,6 +15,9 @@ func Normalize(s *schema.Schema, opts dto.NormalizeOptions) {
 	if s == nil {
 		return
 	}
+	if opts.AutoRepairComments {
+		recoverSchemaComments(s)
+	}
 	unifyAttrs(s.Attrs, opts)
 	for _, t := range s.Tables {
 		normalizeTable(t, opts)

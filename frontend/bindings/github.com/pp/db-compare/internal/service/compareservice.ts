@@ -15,13 +15,13 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as dto$0 from "../dto/models.js";
 
 export function Compare(req: dto$0.CompareRequest): $CancellablePromise<dto$0.CompareResult | null> {
-    return $Call.ByID(1545311918, req);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.CompareService.Compare", req);
 }
 
 export function DefaultNormalize(): $CancellablePromise<dto$0.NormalizeOptions> {
-    return $Call.ByID(4272611251);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.CompareService.DefaultNormalize");
 }
 
 export function TableDiff(sessionID: string, tableName: string): $CancellablePromise<dto$0.TableDiffResult | null> {
-    return $Call.ByID(3622747582, sessionID, tableName);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.CompareService.TableDiff", sessionID, tableName);
 }

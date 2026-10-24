@@ -4,10 +4,14 @@
 import * as CompareService from "./compareservice.js";
 import * as ConnectionService from "./connectionservice.js";
 import * as ProfileService from "./profileservice.js";
+import * as SettingsService from "./settingsservice.js";
+import * as SnapshotService from "./snapshotservice.js";
 import * as SyncService from "./syncservice.js";
 export {
     CompareService,
     ConnectionService,
     ProfileService,
+    SettingsService,
+    SnapshotService,
     SyncService
 };

@@ -15,13 +15,44 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as dto$0 from "../dto/models.js";
 
 export function Apply(req: dto$0.ApplyRequest): $CancellablePromise<dto$0.ApplyResult | null> {
-    return $Call.ByID(2781731679, req);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.SyncService.Apply", req);
+}
+
+export function DiagnoseComments(sessionID: string, side: string): $CancellablePromise<dto$0.CommentRepair[] | null> {
+    return $Call.ByName("github.com/pp/db-compare/internal/service.SyncService.DiagnoseComments", sessionID, side);
+}
+
+export function Export(req: dto$0.ExportRequest): $CancellablePromise<dto$0.ExportFile | null> {
+    return $Call.ByName("github.com/pp/db-compare/internal/service.SyncService.Export", req);
+}
+
+export function GetRun(id: string): $CancellablePromise<dto$0.SyncRun | null> {
+    return $Call.ByName("github.com/pp/db-compare/internal/service.SyncService.GetRun", id);
 }
 
 export function ListAudit(limit: number): $CancellablePromise<dto$0.AuditEntry[] | null> {
-    return $Call.ByID(1321634936, limit);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.SyncService.ListAudit", limit);
+}
+
+export function ListRuns(limit: number): $CancellablePromise<dto$0.SyncRun[] | null> {
+    return $Call.ByName("github.com/pp/db-compare/internal/service.SyncService.ListRuns", limit);
 }
 
 export function Plan(req: dto$0.PlanRequest): $CancellablePromise<dto$0.PlanResult | null> {
-    return $Call.ByID(1912113046, req);
+    return $Call.ByName("github.com/pp/db-compare/internal/service.SyncService.Plan", req);
+}
+
+export function PlanCommentRepair(req: dto$0.RepairRequest): $CancellablePromise<dto$0.PlanResult | null> {
+    return $Call.ByName("github.com/pp/db-compare/internal/service.SyncService.PlanCommentRepair", req);
+}
+
+/**
+ * Resume always inspects live structure; previously successful SQL is never replayed.
+ */
+export function Resume(runID: string): $CancellablePromise<dto$0.ResumeResult | null> {
+    return $Call.ByName("github.com/pp/db-compare/internal/service.SyncService.Resume", runID);
+}
+
+export function SaveExport(req: dto$0.ExportRequest): $CancellablePromise<string> {
+    return $Call.ByName("github.com/pp/db-compare/internal/service.SyncService.SaveExport", req);
 }

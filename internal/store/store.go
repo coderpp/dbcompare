@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,9 +17,11 @@ import (
 
 // Store persists connections, profiles, and audit logs in SQLite.
 type Store struct {
-	db       *sql.DB
-	keyring  SecretStore
-	appName  string
+	snapshotClaims sync.Map
+	dir            string
+	db             *sql.DB
+	keyring        SecretStore
+	appName        string
 }
 
 // SecretStore abstracts OS keychain / in-memory fallback.
@@ -45,8 +48,17 @@ func Open(dir string, secrets SecretStore) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db, keyring: secrets, appName: "dbcompare"}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA busy_timeout=10000; PRAGMA journal_mode=WAL;"); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	s := &Store{dir: dir, db: db, keyring: secrets, appName: "dbcompare"}
 	if err := s.migrate(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := s.initSnapshots(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -57,6 +69,7 @@ func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) migrate() error {
 	_, err := s.db.Exec(`
+CREATE TABLE IF NOT EXISTS sync_runs (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS connections (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -301,3 +314,6 @@ func (s *Store) ListAudit(limit int) ([]dto.AuditEntry, error) {
 	}
 	return out, rows.Err()
 }
+
+// ConfigDir identifies the database used by background workers.
+func (s *Store) ConfigDir() string { return s.dir }

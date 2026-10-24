@@ -3,8 +3,8 @@ package engine
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"strings"
-	"time"
 
 	"ariga.io/atlas/sql/migrate"
 	"ariga.io/atlas/sql/schema"
@@ -17,6 +17,22 @@ func (e *Engine) Plan(ctx context.Context, req dto.PlanRequest) (*dto.PlanResult
 	sess, ok := e.Sessions.Get(req.SessionID)
 	if !ok {
 		return nil, fmt.Errorf("session %s not found; run compare again", req.SessionID)
+	}
+	sess.mu.Lock()
+	if sess.applying {
+		sess.mu.Unlock()
+		return nil, fmt.Errorf("同步正在执行，请等待完成")
+	}
+	sess.Plan = nil
+	sess.mu.Unlock()
+	known := map[string]bool{}
+	for _, it := range sess.Items {
+		known[it.ID] = true
+	}
+	for _, id := range req.ChangeIDs {
+		if !known[id] {
+			return nil, fmt.Errorf("未知差异 %s，请重新对比", id)
+		}
 	}
 	selected := sess.SelectChanges(req.ChangeIDs)
 	skippedDrops := 0
@@ -51,6 +67,7 @@ func (e *Engine) Plan(ctx context.Context, req dto.PlanRequest) (*dto.PlanResult
 	}
 
 	pre := Precheck(sess.SourceSch, sess.TargetSch, sess.Target.SemVer, selected)
+	pre = append(pre, checkSelectionDependencies(sess.TargetSch, selected)...)
 	if skippedDrops > 0 {
 		pre = append(pre, dto.PrecheckIssue{
 			Level: dto.RiskWarn, Code: "drops_skipped",
@@ -73,6 +90,7 @@ func (e *Engine) Plan(ctx context.Context, req dto.PlanRequest) (*dto.PlanResult
 		return nil, fmt.Errorf("plan changes: %w", err)
 	}
 
+	selectedItems := itemsForChanges(sess, selected)
 	stmts := make([]dto.PlannedStatement, 0, len(plan.Changes))
 	for i, c := range plan.Changes {
 		sql := ensureQuotedSQL(c.Cmd)
@@ -97,22 +115,40 @@ func (e *Engine) Plan(ctx context.Context, req dto.PlanRequest) (*dto.PlanResult
 		} else if strings.Contains(up, "DROP ") || strings.Contains(up, "MODIFY") || strings.Contains(up, "CHANGE") {
 			risk = dto.RiskWarn
 		}
+		table, links := statementLinks(sess, c.Source, selectedItems)
+		if table == "" || len(links) == 0 {
+			return nil, fmt.Errorf("SQL 缺少明确的差异关联，已停止生成：%s", c.Comment)
+		}
 		changeID := ""
-		if c.Source != nil {
-			// Best-effort map by index.
-			changeID = fmt.Sprintf("c%d", i)
+		if len(links) > 0 {
+			changeID = links[0]
 		}
 		stmts = append(stmts, dto.PlannedStatement{
-			ID:       fmt.Sprintf("s%d", i),
-			ChangeID: changeID,
-			SQL:      sql,
-			Reverse:  rev,
-			Risk:     risk,
-			Comment:  c.Comment,
+			ID:        fmt.Sprintf("s%d", i),
+			ChangeID:  changeID,
+			ChangeIDs: links,
+			Table:     table,
+			SQL:       sql,
+			Reverse:   rev,
+			Risk:      risk,
+			Comment:   c.Comment,
 		})
 	}
 
-	result := &dto.PlanResult{Statements: stmts, Prechecks: pre, Blocked: blocked}
+	tables := []string{}
+	for _, st := range stmts {
+		tables = append(tables, st.Table)
+	}
+	snapshots, err := snapshotsFor(ctx, sess.Target, tables)
+	if err != nil {
+		return nil, fmt.Errorf("读取同步前结构: %w", err)
+	}
+	result := &dto.PlanResult{TargetDatabase: sess.Target.Config.Database, ID: uuid.NewString(), SessionID: sess.ID, Selected: selectedItems, Snapshots: snapshots, AllowDrop: req.AllowDrop, AllowUnsafe: req.AllowUnsafe, Mode: "schema", Statements: stmts, Prechecks: pre, Blocked: blocked}
+	if sess.Normalize.AutoRepairComments {
+		if err := e.includeAutomaticRepairs(ctx, sess, result); err != nil {
+			return nil, err
+		}
+	}
 	sess.mu.Lock()
 	sess.Plan = result
 	sess.mu.Unlock()
@@ -121,7 +157,7 @@ func (e *Engine) Plan(ctx context.Context, req dto.PlanRequest) (*dto.PlanResult
 
 func isDropChange(ch schema.Change) bool {
 	switch ch.(type) {
-	case *schema.DropTable, *schema.DropColumn, *schema.DropIndex, *schema.DropForeignKey, *schema.DropCheck:
+	case *schema.DropTable, *schema.DropColumn, *schema.DropIndex, *schema.DropForeignKey, *schema.DropCheck, *schema.DropPrimaryKey:
 		return true
 	default:
 		return false
@@ -143,103 +179,9 @@ func truncate(s string, n int) string {
 // ProgressFunc receives apply progress updates.
 type ProgressFunc func(dto.ApplyProgress)
 
-// Apply executes planned statements on the target, then post-verifies.
+// Apply executes a plan; services use ApplyTracked to persist each transition.
 func (e *Engine) Apply(ctx context.Context, req dto.ApplyRequest, onProgress ProgressFunc, audit func(dto.AuditEntry)) (*dto.ApplyResult, error) {
-	sess, ok := e.Sessions.Get(req.SessionID)
-	if !ok {
-		return nil, fmt.Errorf("session %s not found", req.SessionID)
-	}
-	sess.mu.Lock()
-	plan := sess.Plan
-	sess.mu.Unlock()
-	if plan == nil || len(plan.Statements) == 0 {
-		return nil, fmt.Errorf("no plan; call Plan first")
-	}
-	if plan.Blocked && !req.DryRun {
-		return nil, fmt.Errorf("plan is blocked by precheck errors; set allowUnsafe or fix selection")
-	}
-
-	stmts := plan.Statements
-	if len(req.StatementIDs) > 0 {
-		set := map[string]bool{}
-		for _, id := range req.StatementIDs {
-			set[id] = true
-		}
-		filtered := stmts[:0]
-		for _, s := range stmts {
-			if set[s.ID] {
-				filtered = append(filtered, s)
-			}
-		}
-		stmts = filtered
-	}
-
-	result := &dto.ApplyResult{}
-	if req.DryRun {
-		result.Applied = len(stmts)
-		result.VerifyClean = true
-		result.VerifySummary = "dry-run: no statements executed"
-		return result, nil
-	}
-
-	// Session safety settings.
-	if _, err := sess.Target.DB.ExecContext(ctx, "SET SESSION foreign_key_checks=0"); err != nil {
-		return nil, err
-	}
-	defer func() { _, _ = sess.Target.DB.ExecContext(context.Background(), "SET SESSION foreign_key_checks=1") }()
-	_, _ = sess.Target.DB.ExecContext(ctx, "SET SESSION sql_mode='STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION'")
-
-	total := len(stmts)
-	for i, st := range stmts {
-		if onProgress != nil {
-			onProgress(dto.ApplyProgress{Total: total, Done: i, CurrentSQL: st.SQL, Message: fmt.Sprintf("executing %d/%d", i+1, total)})
-		}
-		start := time.Now()
-		_, err := sess.Target.DB.ExecContext(ctx, st.SQL)
-		entry := dto.AuditEntry{
-			ID:         fmt.Sprintf("%s-%d", sess.ID, i),
-			At:         time.Now().Format(time.RFC3339),
-			Action:     "apply_ddl",
-			SourceDSN:  MaskDSN(sess.Source.Config),
-			TargetDSN:  MaskDSN(sess.Target.Config),
-			SQL:        st.SQL,
-			OK:         err == nil,
-			DurationMs: time.Since(start).Milliseconds(),
-		}
-		if err != nil {
-			entry.Error = err.Error()
-			result.Failed++
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", st.SQL, err))
-			if audit != nil {
-				audit(entry)
-			}
-			if onProgress != nil {
-				onProgress(dto.ApplyProgress{Total: total, Done: i, CurrentSQL: st.SQL, Message: err.Error(), Failed: true})
-			}
-			break
-		}
-		result.Applied++
-		if audit != nil {
-			audit(entry)
-		}
-	}
-
-	// Post-sync verification.
-	verify, err := e.verifySession(ctx, sess)
-	if err != nil {
-		result.VerifySummary = "verify failed: " + err.Error()
-		result.VerifyClean = false
-	} else {
-		result.VerifyClean = verify.Remaining == 0
-		result.Remaining = verify.Remaining
-		result.VerifySummary = verify.Summary
-	}
-	if onProgress != nil {
-		onProgress(dto.ApplyProgress{
-			Total: total, Done: result.Applied, Message: result.VerifySummary, Failed: result.Failed > 0,
-		})
-	}
-	return result, nil
+	return e.ApplyTracked(ctx, req, onProgress, audit, nil)
 }
 
 type verifyResult struct {
@@ -263,6 +205,8 @@ func (e *Engine) verifySession(ctx context.Context, sess *Session) (*verifyResul
 	if err != nil {
 		return nil, err
 	}
+	changes = visibleSchemaChanges(changes, dstSch, srcSch, sess.Normalize)
+
 	// Ignore remaining drops if user didn't allow drop (target may have extra tables).
 	remaining := 0
 	for _, ch := range changes {
